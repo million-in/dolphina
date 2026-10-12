@@ -10,12 +10,55 @@ residual writes, source-reading limitations, and what diagnostic scores mean.
 The root `.gitignore` excludes runtime data, model tensors and environments;
 only source, documentation and dependency metadata are published.
 
+## Fresh checkout setup
+
+Supported pinned environment: **Linux x86_64, Python 3.10 with venv support**.
+Provide those prerequisites yourself; the script does not use sudo or change
+system Python. Allow several GB for packages and the model cache, plus run data.
+
+```sh
+bash setup.sh
+```
+
+This creates `research/.venv-inspect`, installs the committed dependency lock
+(including CPU PyTorch, Transformers and NNsight), downloads the pinned model
+snapshot, and runs the baseline smoke test. It works regardless of the caller's
+working directory and does not overwrite dependency locks or the model revision.
+Use `PYTHON=python3.10 bash setup.sh` to select an interpreter,
+`DOLPHINE_VENV=/your/venv` to select a venv, or `--skip-smoke` to install/download
+without inference. CPU-only FLA kernels provide no acceleration, so the optional
+FLA experiment environment is not installed. GPU/macOS environments need their
+own validated dependency set; this bootstrap deliberately rejects them.
+
 ## Run the baseline
 
 ```sh
 cd research
-.venv/bin/python smoke_test.py
+.venv-inspect/bin/python smoke_test.py
 ```
+
+## Residual, logit-lens and weight diagnostics
+
+From the script directory in the research environment:
+
+```sh
+.venv-inspect/bin/python analyze_model.py --prompt 'Explain how a rainbow forms.' --blocks 3,23 --heads 0,1 --max-new-tokens 32 --verify
+```
+
+`runs/analysis-*/result.json` contains one row per generated self-target token.
+Each row measures the **preceding** residual position at every block depth:
+entropy in nats, self-target rank, target logit and signed additive block DLA.
+The final RMSNorm and unembedding define the lens. DLA freezes the observed
+final RMS denominator, includes the embedding, and checks reconstruction.
+`--verify` compares emitted IDs against uninstrumented greedy generation.
+
+`--blocks` and `--heads` select **weight spectra only**; lens/DLA cover all block
+boundaries. Only full-attention blocks support raw QK/OV proxies, with correct
+grouped-query KV mapping and query/gate separation. Singular values omit
+structural trailing zeros. These are weight geometry, not attention maps.
+See the interpretation guide for the omitted nonlinearities and causal limits.
+Limits remain 256 prompt tokens including formatting and 128 generated tokens;
+longer tests within those bounds are not a full-context-window benchmark.
 
 ## Custom prompts and NNsight
 
@@ -59,8 +102,7 @@ print(a['layer_0'][0, -1, :])  # all features at final prompt token
 These are FP32, unquantized, evaluation-mode inference captures without
 gradients. An activation value alone does not establish causal importance.
 
-`setup.sh` installs CPU PyTorch and Transformers into a virtual environment.
-It records resolved package versions in `requirements.lock.txt`. The first
+`setup.sh` installs the pinned research environment without changing lock files. The first
 smoke test pins the Hugging Face commit in `model_revision.txt`; subsequent
 runs use that commit. The full multimodal checkpoint is loaded, with text-only
 inputs in this initial test. There is no quantization or weight training.
