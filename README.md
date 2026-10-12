@@ -1,4 +1,15 @@
-# Qwen CPU interpretability baseline
+# Dolphine
+
+Mechanistic interpretability tools for residual streams, selected neurons and
+attention heads. The current checkpoint is Qwen3.5-0.8B; it is not the project name.
+Source lives in `research/`. Run local commands from that directory; the VM uses
+`~/qwen-research` for compatibility with the existing installation. Cloud resource
+names below are operational identifiers, not the project codename.
+
+See [interpretation notes](research/INTERPRETATION.md) for up/down projections,
+residual writes, source-reading limitations, and what diagnostic scores mean.
+The root `.gitignore` excludes runtime data, model tensors and environments;
+only source, documentation and dependency metadata are published.
 
 Project: `pures-511400`. VM: `qwen-research-cpu`, zone: `us-central1-a`.
 Machine: `e2-standard-8` (8 vCPUs, 32 GiB RAM), 50 GB balanced boot disk.
