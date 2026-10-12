@@ -2,33 +2,20 @@
 
 Mechanistic interpretability tools for residual streams, selected neurons and
 attention heads. The current checkpoint is Qwen3.5-0.8B; it is not the project name.
-Source lives in `research/`. Run local commands from that directory; the VM uses
-`~/qwen-research` for compatibility with the existing installation. Cloud resource
-names below are operational identifiers, not the project codename.
+Source lives in `research/`. Run commands from that directory in an environment
+with the recorded dependencies installed. Keep deployment details private.
 
 See [interpretation notes](research/INTERPRETATION.md) for up/down projections,
 residual writes, source-reading limitations, and what diagnostic scores mean.
 The root `.gitignore` excludes runtime data, model tensors and environments;
 only source, documentation and dependency metadata are published.
 
-Project: `pures-511400`. VM: `qwen-research-cpu`, zone: `us-central1-a`.
-Machine: `e2-standard-8` (8 vCPUs, 32 GiB RAM), 50 GB balanced boot disk.
-The VM was created with a 7,200-second maximum run duration and STOP action.
-No GPU, billing upgrade, service account, notebook server, or managed group
-is needed. Compute is estimated at $0.268/hour, plus disk and external IPv4;
-the persistent disk remains billable against eligible credit while stopped.
-
-## Connect and rerun
+## Run the baseline
 
 ```sh
-gcloud compute ssh macbook@qwen-research-cpu --project=pures-511400 --zone=us-central1-a
-cd ~/qwen-research
+cd research
 .venv/bin/python smoke_test.py
 ```
-
-Browser SSH may log in as `kezamilindi` instead. The installation is on the VM
-under `/home/macbook/qwen-research`, not on the laptop. Use `sudo -iu macbook`
-first in that case.
 
 ## Custom prompts and NNsight
 
@@ -45,7 +32,6 @@ It is intentionally not enabled in the research environment, which keeps the
 reference PyTorch kernels. `requirements.fla.lock.txt` records its packages.
 
 ```sh
-cd /home/macbook/qwen-research
 .venv-inspect/bin/python inspect_model.py --prompt 'What is 2 + 3?' --layers 0,2 --max-new-tokens 32
 .venv-inspect/bin/python inspect_model.py --prompt 'Explain gravity briefly.' --system 'Be concise.' --layers all
 ```
@@ -149,12 +135,8 @@ Source is retained locally in Git; run data is ignored and must be backed up
 separately if needed after VM deletion. The VM environment is used for runtime
 validation, and tested source is copied back locally before topic commits.
 
-## Stop early
+## Deployment privacy
 
-```sh
-gcloud compute instances stop qwen-research-cpu --project=pures-511400 --zone=us-central1-a
-```
-
-Do not upgrade billing if retaining the non-billable Free Trial is required.
-The 2-hour timer limits a run, not total project spending. Save important
-research outside the VM before the trial expires.
+Connection commands, account names and cloud identifiers belong in private
+deployment notes, not this public README. Back up important research separately
+and stop compute through your provider when unused; storage may remain billable.
