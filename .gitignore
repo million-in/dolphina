@@ -5,3 +5,4 @@ __pycache__/
 .venv*/
 research/runs/
 *.pt
+research/smoke_test_result.json
