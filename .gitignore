@@ -1,0 +1,7 @@
+.cache/
+.pure/
+__pycache__/
+*.pyc
+.venv*/
+research/runs/
+*.pt
