@@ -81,6 +81,63 @@ experiments must run outside `torch.no_grad()` and need additional testing.
 Qwen3.5 uses hybrid attention; standard transformer interpretability tools
 may need architecture-specific adaptations.
 
+## Offline tensor viewer
+
+```sh
+.venv-inspect/bin/python view_activations.py runs/RUN_ID --layer 23 --token 5 --feature 100
+.venv-inspect/bin/python view_activations.py runs/RUN_ID --layer 0 --token all --feature 0,7 --csv values.csv
+```
+
+This reads existing prompt captures without loading a model. CSV files are never
+overwritten. For laptop use, install PyTorch in a local virtual environment and
+copy both `activations.pt` and `result.json`; source alone does not include data.
+
+## Generated-token internals
+
+```sh
+.venv-inspect/bin/python record_generation.py --prompt 'What is 2 + 3? Answer briefly.' --blocks 0,3,23 --heads 0,1 --neurons 0,17 --max-new-tokens 8 --verify
+.venv-inspect/bin/python view_generation.py runs/generation-RUN_ID --position 5 --tensor layer_0.mlp_neurons --feature 17
+.venv-inspect/bin/python view_generation.py runs/generation-RUN_ID --position 5 --tensor layer_3.heads --head 1 --feature 0
+```
+
+The recorder uses observational PyTorch hooks, not NNsight, for explicit module
+input capture; the NNsight prompt workflow remains available unchanged.
+It saves embeddings, selected block inputs/outputs, selected MLP intermediate
+neurons and selected gated head vectors before the output projection. MLP values
+are `activation(gate_proj(x)) * up_proj(x)`, not residual-stream coordinates.
+Full-attention heads and DeltaNet value heads have different meanings; neither
+capture is an attention-probability matrix. Arbitrary valid block indices can be
+selected; head/neuron IDs must exist in every selected block.
+
+Generation is greedy, FP32, uncached prefix replay: slower than cached decoding
+but simpler to inspect. The first step records every prompt token; each later
+step records only the newest processed token. All emitted tokens, including the
+last one/EOS, are processed. `positions` are absolute zero-based token positions;
+the last processed token's logits predict `prediction_position`, not itself.
+The final step emits nothing. `result.json` includes token labels, response,
+original head/neuron IDs, stop reason, and per-step tensor filenames. Each `.pt`
+is a tensor dictionary loaded with `weights_only=True`; embedding/block shapes
+are `[batch, captured_tokens, hidden]`, neurons `[batch, captured_tokens, selected_neurons]`,
+and heads `[batch, captured_tokens, selected_heads, head_dim]`.
+
+Limits: 256 prompt tokens and 128 generated tokens. No silent truncation,
+sampling, gradients, interventions, vision-input tracing, or causal claims.
+`--verify` compares all emitted IDs with uninstrumented uncached HF generation;
+it does not promise equivalence to every cached/optimized backend.
+Capturing activity is evidence of a response, not proof that a circuit caused it;
+ablation or patching with controls remains a separate experiment.
+
+Qwen3.5-0.8B supports thinking and non-thinking modes: use `--thinking` to enable
+the thinking template. Its model card warns about thinking loops, so token caps
+remain necessary; a capped run may not reach a final answer. Generated reasoning
+text is not a faithful readout of internal computation.
+Source: https://huggingface.co/Qwen/Qwen3.5-0.8B
+
+Run tests on the VM: `.venv-inspect/bin/python -m unittest discover -p 'test_*.py' -v`.
+Source is retained locally in Git; run data is ignored and must be backed up
+separately if needed after VM deletion. The VM environment is used for runtime
+validation, and tested source is copied back locally before topic commits.
+
 ## Stop early
 
 ```sh
