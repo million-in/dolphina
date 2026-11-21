@@ -105,3 +105,24 @@ Boundaries for the Qwen numbers:
 Treat low-dimensionality, high-polysemanticity concentrations as candidate
 places to look with activation-based tools, exactly as with the lens/DLA
 diagnostics above: they select hypotheses, they do not confirm circuits.
+
+### Where this goes next
+
+Two papers define the expansion path, in order:
+
+1. [Sparse Autoencoders Find Highly Interpretable Features in Language
+   Models](https://arxiv.org/abs/2309.08600) (Cunningham et al., 2023).
+   Train sparse autoencoders on captured Qwen activations (the existing
+   recorders are the data source), starting where this inspection points:
+   the mid blocks with the lowest dimensionality sums and highest measured
+   net interference. The testable expansion of the current result is
+   whether SAE decoder directions recover sparser, more monosemantic units
+   than the `down_proj` columns analyzed here, and whether their activation
+   frequencies and dimensionalities follow the toy-model geometry.
+2. [Sparse Feature Circuits: Discovering and Editing Interpretable Causal
+   Graphs in Language Models](https://arxiv.org/abs/2403.19647)
+   (Marks et al., 2024; ICLR 2025). Once features exist, move from these
+   correlational diagnostics to causal claims: attribute a behavior to
+   sparse features, ablate or edit them, and measure the effect. That is
+   the step that would let a Dolphine result say a superposed feature
+   *causes* an output, which nothing in the current tooling licenses.
