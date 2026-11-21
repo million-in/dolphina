@@ -4,9 +4,11 @@ import tempfile
 import unittest
 
 import torch
+from torch import nn
 from safetensors.torch import save_file
 
-from inspect_superposition import DOWN, EMBED, inspect_weights, tensor_files
+from inspect_superposition import (DOWN, EMBED, NeuronActivity,
+                                   inspect_weights, tensor_files)
 from superposition import feature_geometry, summarize_geometry
 
 
@@ -64,6 +66,61 @@ class InspectWeightsTests(unittest.TestCase):
         with self.make_snapshot(tensors) as snapshot:
             with self.assertRaises(ValueError):
                 inspect_weights(snapshot, layers=[0])
+
+
+class FakeMlp(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.gate_proj = nn.Linear(4, 3, bias=False)
+        self.up_proj = nn.Linear(4, 3, bias=False)
+        self.down_proj = nn.Linear(3, 4, bias=False)
+
+    def forward(self, x):
+        return self.down_proj(torch.nn.functional.silu(self.gate_proj(x)) * self.up_proj(x))
+
+
+class NeuronActivityTests(unittest.TestCase):
+    def test_counts_match_manual(self):
+        torch.manual_seed(5)
+        mlp = FakeMlp()
+        activity = NeuronActivity({0: mlp}, chunk=2)
+        x = torch.randn(2, 5, 4)
+        with torch.no_grad():
+            mlp(x)
+            mlp(x)  # second pass must double, not replace, the positions
+        result = activity.result()[0]
+        activity.close()
+        gate, up = mlp.gate_proj(x), mlp.up_proj(x)
+        m = torch.nn.functional.silu(gate) * up
+        self.assertEqual(result['positions'], 20)
+        torch.testing.assert_close(result['active_fraction'],
+                                   (gate > 0).float().mean(dim=(0, 1)))
+        torch.testing.assert_close(result['mean_square_m'], m.square().mean(dim=(0, 1)))
+        torch.testing.assert_close(result['mean_abs_m'], m.abs().mean(dim=(0, 1)))
+
+    def test_activity_feeds_net_interference(self):
+        angles = torch.arange(5) * 2 * torch.pi / 5
+        pentagon = torch.stack([angles.cos(), angles.sin()], dim=-1)
+        down = torch.tensor([[1.0, -1.0, 0.0], [0.0, 0.0, 1.0]])
+        probabilities = torch.tensor([0.25, 1.0, 0.5])
+        activity = {0: {'positions': 8, 'active_fraction': probabilities,
+                        'mean_square_m': torch.zeros(3), 'mean_abs_m': torch.zeros(3)}}
+        helper = InspectWeightsTests()
+        with helper.make_snapshot({EMBED: pentagon, DOWN.format(0): down}) as snapshot:
+            result = inspect_weights(snapshot, layers=[0], chunk=2, full=True,
+                                     activity=activity)
+        mlp = result['mlp_down_proj_columns']['0']
+        expected = feature_geometry(down.T, probabilities)
+        torch.testing.assert_close(
+            torch.tensor(mlp['per_feature']['net_interference']),
+            expected['net_interference'])
+        self.assertIn('net_interference_represented', mlp)
+        self.assertEqual(mlp['activation']['active_fraction']['max'], 1.0)
+        with helper.make_snapshot({EMBED: pentagon, DOWN.format(0): down}) as snapshot:
+            with self.assertRaises(ValueError):
+                bad = dict(activity)
+                bad[0] = dict(activity[0], active_fraction=torch.zeros(2))
+                inspect_weights(snapshot, layers=[0], activity=bad)
 
 
 if __name__ == '__main__':
