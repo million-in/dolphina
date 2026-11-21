@@ -60,6 +60,61 @@ See the interpretation guide for the omitted nonlinearities and causal limits.
 Limits remain 256 prompt tokens including formatting and 128 generated tokens;
 longer tests within those bounds are not a full-context-window benchmark.
 
+## Superposition geometry (toy calibration + Qwen weights)
+
+From the script directory in the research environment:
+
+```sh
+.venv-inspect/bin/python inspect_superposition.py --layers all --toy-calibration
+.venv-inspect/bin/python inspect_superposition.py --layers all --activations
+.venv-inspect/bin/python inspect_superposition.py --layers 0,3,23 --full
+```
+
+`--activations` additionally runs the pinned checkpoint once per prompt of a
+small built-in prompt set (or `--prompts-file`, one prompt per line) and
+measures per-neuron activation frequencies: the fraction of prompt-token
+positions with gate pre-activation above zero, plus mean `m^2` and mean
+`|m|` for the gated scalar `m = SiLU(gate) * up`. The gate-active fraction
+is used as the notebook's feature probability, so each MLP layer also gets
+probability-weighted net interference. The activation pass defaults to BF16
+so it fits small machines (`--dtype float32` for the heavier pass); weight
+geometry stays FP32. Frequencies from ten short prompts describe that
+prompt set only, not text in general.
+
+This ports the geometry of Anthropic's
+[toy models of superposition](https://github.com/anthropics/toy-models-of-superposition):
+for feature directions `W` in a shared hidden space it reports row norms,
+polysemanticity (off-diagonal interference), probability-weighted net
+interference where feature frequencies are known, fractional dimensionality
+`D_i = ||W_i||^2 / sum_j (unit_i . W_j)^2`, and `n_hidden / ||W||_F^2`.
+[research/superposition.py](research/superposition.py) computes these from the
+`[hidden, hidden]` Gram matrix in two streamed passes instead of a dense
+features-by-features matrix; tests pin it to the notebook's dense formulas and
+to exact known geometries (basis, antipodal pair, pentagon).
+
+For Qwen, the direction sets are token embedding rows (tied to the
+unembedding) and, per block, MLP neuron write directions — the columns of
+`down_proj.weight`. Tensors are streamed from safetensors slices and upcast
+to FP32; the full model is never loaded and no inference runs, so this works
+in a few GB of RAM. `runs/superposition-*/result.json` holds summaries
+(quantiles, dimensionality sum and histogram, represented counts at a stated
+norm threshold); `--full` adds per-feature arrays. `--toy-calibration` trains
+the notebook's intro sweep (5 features, 2 hidden, 10 instances spanning
+feature probabilities 1 to 1/20, importance `0.9^i`) with a fixed seed and
+records before/after loss on a fixed evaluation batch plus the same geometry
+per instance, so the Qwen numbers sit next to a ground-truth case where
+superposition is known to occur. This is weight geometry, not evidence that
+any Qwen neuron or token direction is a superposed feature; see the
+interpretation guide before drawing conclusions.
+
+Library use from the same environment:
+
+```python
+from superposition import ToyConfig, feature_geometry, train_toy
+model, record = train_toy(ToyConfig(5, 2, 10), steps=200)
+print(feature_geometry(model.W.detach()[0])['dimensionality'])
+```
+
 ## Custom prompts and NNsight
 
 The separate `.venv-inspect` environment preserves the baseline `.venv`.

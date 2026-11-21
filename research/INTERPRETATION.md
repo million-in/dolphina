@@ -51,3 +51,78 @@ interventions; DeltaNet blocks do not have the same softmax attention map.
 
 Use these tools to select hypotheses, then compare matched prompts and perform
 controlled ablation/patching before making causal claims.
+
+## Superposition geometry
+
+[Toy Models of Superposition](https://transformer-circuits.pub/2022/toy_model/index.html)
+(Elhage et al.) trains a tied-weight ReLU autoencoder `relu(x W^T W + b)` on
+synthetic features that are sparse (active with probability `p`) and weighted
+by importance. When there are more features than hidden dimensions and the
+features are sparse enough, the model does not drop the extra features: it
+packs several feature directions into each dimension in near-orthogonal
+arrangements (antipodal pairs, pentagons, and other polytopes), accepting
+interference that rarely matters because co-activation is rare. The notebook
+quantifies this with per-feature norms, interference between directions
+(polysemanticity), probability-weighted net interference, and fractional
+dimensionality `D_i`, the share of a dimension one feature effectively owns;
+the `D_i` sum to at most the number of hidden dimensions actually used.
+
+`inspect_superposition.py` computes the same quantities two ways. The toy
+calibration reproduces the notebook's intro sweep under a fixed seed, which
+is a ground-truth check on the metrics themselves: dense instances should
+keep few near-basis features, sparse instances should represent more
+features at fractional dimensionality. The Qwen pass then treats embedding
+rows and per-block MLP `down_proj` columns as candidate direction sets.
+
+Boundaries for the Qwen numbers:
+
+- A neuron's write direction is not a feature, and a token embedding row is
+  not a feature either. Overlap between write directions is necessary for
+  superposition of MLP features, not sufficient evidence for it. Real
+  features could be sparser combinations of neurons (the usual sparse
+  autoencoder hypothesis) or could live in directions no single column has.
+- The toy result is driven by sparsity: superposition pays only when
+  co-activation is rare. With `--activations`, per-neuron activity is
+  measured as the fraction of prompt-token positions with gate
+  pre-activation above zero and used as the notebook's feature probability
+  for net interference, alongside mean `m^2` / mean `|m|` of the gated
+  scalar. Gate-positive is a definitional choice, not a discovered firing
+  threshold; the default corpus is ten short prompts, so frequencies are
+  coarse (granularity 1/positions), prompt-set-specific, cover prompt
+  positions only, and come from a BF16 pass by default. The embedding set
+  still gets no net interference: ten prompts cannot estimate vocabulary
+  frequencies. Corpus-scale frequencies are the natural next experiment.
+- Dimensionality sums near the hidden size mostly say the direction set
+  spans the space at varied norms; read them together with the norm and
+  `D_i` distributions, not as a superposition score. A set of random
+  directions in high dimensions is also mutually near-orthogonal.
+- The gated MLP scalar `SiLU(gate) * up` can flip a column's effective sign;
+  these metrics are quadratic and therefore sign-insensitive, which matches
+  the toy model's geometry but ignores sign structure in real writes.
+- Embedding rows here are also the unembedding (tied weights), so their
+  geometry reflects both reading and writing vocabularies.
+
+Treat low-dimensionality, high-polysemanticity concentrations as candidate
+places to look with activation-based tools, exactly as with the lens/DLA
+diagnostics above: they select hypotheses, they do not confirm circuits.
+
+### Where this goes next
+
+Two papers define the expansion path, in order:
+
+1. [Sparse Autoencoders Find Highly Interpretable Features in Language
+   Models](https://arxiv.org/abs/2309.08600) (Cunningham et al., 2023).
+   Train sparse autoencoders on captured Qwen activations (the existing
+   recorders are the data source), starting where this inspection points:
+   the mid blocks with the lowest dimensionality sums and highest measured
+   net interference. The testable expansion of the current result is
+   whether SAE decoder directions recover sparser, more monosemantic units
+   than the `down_proj` columns analyzed here, and whether their activation
+   frequencies and dimensionalities follow the toy-model geometry.
+2. [Sparse Feature Circuits: Discovering and Editing Interpretable Causal
+   Graphs in Language Models](https://arxiv.org/abs/2403.19647)
+   (Marks et al., 2024; ICLR 2025). Once features exist, move from these
+   correlational diagnostics to causal claims: attribute a behavior to
+   sparse features, ablate or edit them, and measure the effect. That is
+   the step that would let a Dolphine result say a superposed feature
+   *causes* an output, which nothing in the current tooling licenses.
