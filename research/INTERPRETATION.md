@@ -51,3 +51,51 @@ interventions; DeltaNet blocks do not have the same softmax attention map.
 
 Use these tools to select hypotheses, then compare matched prompts and perform
 controlled ablation/patching before making causal claims.
+
+## Superposition geometry
+
+[Toy Models of Superposition](https://transformer-circuits.pub/2022/toy_model/index.html)
+(Elhage et al.) trains a tied-weight ReLU autoencoder `relu(x W^T W + b)` on
+synthetic features that are sparse (active with probability `p`) and weighted
+by importance. When there are more features than hidden dimensions and the
+features are sparse enough, the model does not drop the extra features: it
+packs several feature directions into each dimension in near-orthogonal
+arrangements (antipodal pairs, pentagons, and other polytopes), accepting
+interference that rarely matters because co-activation is rare. The notebook
+quantifies this with per-feature norms, interference between directions
+(polysemanticity), probability-weighted net interference, and fractional
+dimensionality `D_i`, the share of a dimension one feature effectively owns;
+the `D_i` sum to at most the number of hidden dimensions actually used.
+
+`inspect_superposition.py` computes the same quantities two ways. The toy
+calibration reproduces the notebook's intro sweep under a fixed seed, which
+is a ground-truth check on the metrics themselves: dense instances should
+keep few near-basis features, sparse instances should represent more
+features at fractional dimensionality. The Qwen pass then treats embedding
+rows and per-block MLP `down_proj` columns as candidate direction sets.
+
+Boundaries for the Qwen numbers:
+
+- A neuron's write direction is not a feature, and a token embedding row is
+  not a feature either. Overlap between write directions is necessary for
+  superposition of MLP features, not sufficient evidence for it. Real
+  features could be sparser combinations of neurons (the usual sparse
+  autoencoder hypothesis) or could live in directions no single column has.
+- The toy result is driven by sparsity: superposition pays only when
+  co-activation is rare. This inspection measures no activations, so it has
+  no Qwen feature frequencies and deliberately omits net interference for
+  Qwen instead of inventing frequencies. Adding captured-activation
+  frequencies from the existing recorders is the natural next experiment.
+- Dimensionality sums near the hidden size mostly say the direction set
+  spans the space at varied norms; read them together with the norm and
+  `D_i` distributions, not as a superposition score. A set of random
+  directions in high dimensions is also mutually near-orthogonal.
+- The gated MLP scalar `SiLU(gate) * up` can flip a column's effective sign;
+  these metrics are quadratic and therefore sign-insensitive, which matches
+  the toy model's geometry but ignores sign structure in real writes.
+- Embedding rows here are also the unembedding (tied weights), so their
+  geometry reflects both reading and writing vocabularies.
+
+Treat low-dimensionality, high-polysemanticity concentrations as candidate
+places to look with activation-based tools, exactly as with the lens/DLA
+diagnostics above: they select hypotheses, they do not confirm circuits.
