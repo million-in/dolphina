@@ -4,7 +4,8 @@ import torch
 
 from superposition import (ToyConfig, ToyModel, dense_interference,
                            feature_geometry, feature_geometry_streaming,
-                           summarize_geometry, train_toy)
+                           summarize_geometry, toy_instance_geometry,
+                           train_toy)
 
 
 def notebook_geometry(matrix, probabilities):
@@ -123,6 +124,18 @@ class ToyModelTests(unittest.TestCase):
         self.assertTrue(0.1 < nonzero_fraction < 0.3)
         with self.assertRaises(ValueError):
             ToyModel(config, feature_probability=torch.tensor(1.5))
+
+    def test_instance_geometry_broadcasts_instance_probabilities(self):
+        # The notebook sweeps one probability per instance, shape [i, 1].
+        config = ToyConfig(4, 2, 3)
+        model = ToyModel(config,
+                         feature_probability=torch.tensor([[1.0], [0.5], [0.1]]),
+                         generator=torch.Generator().manual_seed(2))
+        summaries = toy_instance_geometry(model)
+        self.assertEqual(len(summaries), 3)
+        for summary in summaries:
+            self.assertIn('net_interference_represented', summary)
+        self.assertEqual(summaries[1]['feature_probability_first'], 0.5)
 
     def test_training_moves_toward_notebook_phases(self):
         # Notebook intro configuration at reduced steps: dense features

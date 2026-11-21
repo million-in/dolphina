@@ -274,6 +274,10 @@ def toy_instance_geometry(model):
         p = None
         if probabilities.ndim == 2:
             p = probabilities[instance]
+            if len(p) == 1:
+                p = p.expand(model.config.n_features)
+            elif len(p) != model.config.n_features:
+                p = None
         elif probabilities.ndim == 0:
             p = probabilities.expand(model.config.n_features)
         geometry = feature_geometry(model.W.detach()[instance], p)
