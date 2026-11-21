@@ -82,10 +82,16 @@ Boundaries for the Qwen numbers:
   features could be sparser combinations of neurons (the usual sparse
   autoencoder hypothesis) or could live in directions no single column has.
 - The toy result is driven by sparsity: superposition pays only when
-  co-activation is rare. This inspection measures no activations, so it has
-  no Qwen feature frequencies and deliberately omits net interference for
-  Qwen instead of inventing frequencies. Adding captured-activation
-  frequencies from the existing recorders is the natural next experiment.
+  co-activation is rare. With `--activations`, per-neuron activity is
+  measured as the fraction of prompt-token positions with gate
+  pre-activation above zero and used as the notebook's feature probability
+  for net interference, alongside mean `m^2` / mean `|m|` of the gated
+  scalar. Gate-positive is a definitional choice, not a discovered firing
+  threshold; the default corpus is ten short prompts, so frequencies are
+  coarse (granularity 1/positions), prompt-set-specific, cover prompt
+  positions only, and come from a BF16 pass by default. The embedding set
+  still gets no net interference: ten prompts cannot estimate vocabulary
+  frequencies. Corpus-scale frequencies are the natural next experiment.
 - Dimensionality sums near the hidden size mostly say the direction set
   spans the space at varied norms; read them together with the norm and
   `D_i` distributions, not as a superposition score. A set of random

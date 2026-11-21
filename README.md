@@ -66,8 +66,20 @@ From the script directory in the research environment:
 
 ```sh
 .venv-inspect/bin/python inspect_superposition.py --layers all --toy-calibration
+.venv-inspect/bin/python inspect_superposition.py --layers all --activations
 .venv-inspect/bin/python inspect_superposition.py --layers 0,3,23 --full
 ```
+
+`--activations` additionally runs the pinned checkpoint once per prompt of a
+small built-in prompt set (or `--prompts-file`, one prompt per line) and
+measures per-neuron activation frequencies: the fraction of prompt-token
+positions with gate pre-activation above zero, plus mean `m^2` and mean
+`|m|` for the gated scalar `m = SiLU(gate) * up`. The gate-active fraction
+is used as the notebook's feature probability, so each MLP layer also gets
+probability-weighted net interference. The activation pass defaults to BF16
+so it fits small machines (`--dtype float32` for the heavier pass); weight
+geometry stays FP32. Frequencies from ten short prompts describe that
+prompt set only, not text in general.
 
 This ports the geometry of Anthropic's
 [toy models of superposition](https://github.com/anthropics/toy-models-of-superposition):
