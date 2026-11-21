@@ -28,7 +28,11 @@ them a NaN dimensionality; here they get exact zeros so results stay JSON-safe.
 Geometry alone does not prove a direction is a feature, nor that superposed
 directions are used as superposed features at inference time.
 """
+from dataclasses import dataclass
+
 import torch
+from torch import nn
+from torch.nn import functional as F
 
 
 def _check(matrix):
@@ -174,3 +178,108 @@ def summarize_geometry(geometry, n_hidden, represented_threshold=0.1):
         summary['net_interference_represented'] = _quantiles(
             geometry['net_interference'].float()[represented])
     return summary
+
+
+@dataclass
+class ToyConfig:
+    """Notebook ``Config``: many instances are trained as one batched model."""
+    n_features: int
+    n_hidden: int
+    n_instances: int
+
+
+class ToyModel(nn.Module):
+    """Tied-weight ReLU autoencoder from the notebook, CPU and seeded.
+
+    Deviations from the Colab original are deliberate and limited: the device
+    defaults to CPU instead of CUDA, all randomness flows through an explicit
+    ``torch.Generator``, and scalars broadcast exactly as in the notebook.
+    ``W`` has shape ``[n_instances, n_features, n_hidden]``; each row
+    ``W[i, f]`` is feature ``f``'s direction in instance ``i``'s hidden space.
+    """
+
+    def __init__(self, config, feature_probability=None, importance=None,
+                 generator=None):
+        super().__init__()
+        self.config = config
+        self.W = nn.Parameter(torch.empty(
+            (config.n_instances, config.n_features, config.n_hidden)))
+        nn.init.xavier_normal_(self.W, generator=generator)
+        self.b_final = nn.Parameter(torch.zeros(
+            (config.n_instances, config.n_features)))
+        self.feature_probability = torch.ones(()) if feature_probability is None \
+            else torch.as_tensor(feature_probability, dtype=torch.float32)
+        self.importance = torch.ones(()) if importance is None \
+            else torch.as_tensor(importance, dtype=torch.float32)
+        for name, value in (('feature_probability', self.feature_probability),
+                            ('importance', self.importance)):
+            if not torch.isfinite(value).all() or (value < 0).any():
+                raise ValueError(f'{name} must be finite and non-negative')
+        if (self.feature_probability > 1).any():
+            raise ValueError('feature_probability must not exceed 1')
+
+    def forward(self, features):
+        hidden = torch.einsum('...if,ifh->...ih', features, self.W)
+        out = torch.einsum('...ih,ifh->...if', hidden, self.W)
+        return F.relu(out + self.b_final)
+
+    def generate_batch(self, n_batch, generator=None):
+        shape = (n_batch, self.config.n_instances, self.config.n_features)
+        values = torch.rand(shape, generator=generator)
+        active = torch.rand(shape, generator=generator) <= self.feature_probability
+        return torch.where(active, values, torch.zeros(()))
+
+    def loss_per_instance(self, batch):
+        error = self.importance * (batch.abs() - self(batch)) ** 2
+        return error.mean(dim=(0, 2))
+
+
+def train_toy(config, feature_probability=None, importance=None, steps=4000,
+              n_batch=1024, lr=1e-3, seed=0):
+    """Notebook ``optimize`` with constant LR, made reproducible.
+
+    Returns ``(model, record)`` where the record holds before/after loss per
+    instance on one fixed seeded evaluation batch; noisy training-batch loss
+    is not used as evidence of convergence. No LR schedule, rendering or
+    progress hooks: the notebook's defaults are constant LR without them.
+    """
+    if steps < 1 or n_batch < 1 or lr <= 0:
+        raise ValueError('steps, n_batch and lr must be positive')
+    generator = torch.Generator().manual_seed(seed)
+    model = ToyModel(config, feature_probability, importance, generator=generator)
+    eval_batch = model.generate_batch(n_batch, generator=torch.Generator().manual_seed(seed + 1))
+    with torch.no_grad():
+        initial = model.loss_per_instance(eval_batch)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
+    for _ in range(steps):
+        optimizer.zero_grad(set_to_none=True)
+        loss = model.loss_per_instance(model.generate_batch(n_batch, generator)).sum()
+        loss.backward()
+        optimizer.step()
+    with torch.no_grad():
+        final = model.loss_per_instance(eval_batch)
+    if not (torch.isfinite(final).all() and torch.isfinite(model.W).all()):
+        raise ValueError('nonfinite toy training result')
+    record = {'seed': seed, 'steps': steps, 'n_batch': n_batch, 'lr': lr,
+              'eval_loss_per_instance_initial': initial.tolist(),
+              'eval_loss_per_instance_final': final.tolist()}
+    return model, record
+
+
+def toy_instance_geometry(model):
+    """Geometry summary per trained instance, probabilities included when known."""
+    probabilities = model.feature_probability
+    summaries = []
+    for instance in range(model.config.n_instances):
+        p = None
+        if probabilities.ndim == 2:
+            p = probabilities[instance]
+        elif probabilities.ndim == 0:
+            p = probabilities.expand(model.config.n_features)
+        geometry = feature_geometry(model.W.detach()[instance], p)
+        summary = summarize_geometry(geometry, model.config.n_hidden)
+        summary['instance'] = instance
+        if probabilities.ndim == 2:
+            summary['feature_probability_first'] = float(probabilities[instance, 0])
+        summaries.append(summary)
+    return summaries

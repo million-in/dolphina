@@ -2,8 +2,9 @@ import unittest
 
 import torch
 
-from superposition import (dense_interference, feature_geometry,
-                           feature_geometry_streaming, summarize_geometry)
+from superposition import (ToyConfig, ToyModel, dense_interference,
+                           feature_geometry, feature_geometry_streaming,
+                           summarize_geometry, train_toy)
 
 
 def notebook_geometry(matrix, probabilities):
@@ -97,6 +98,56 @@ class GeometryTests(unittest.TestCase):
         self.assertEqual(summary['dimensionality_sum'], 4.0)
         self.assertEqual(summary['hidden_over_frobenius_sq'], 1.0)
         self.assertEqual(summary['dimensionality_represented']['median'], 1.0)
+
+
+class ToyModelTests(unittest.TestCase):
+    def test_tied_reconstruction_matches_manual(self):
+        model = ToyModel(ToyConfig(3, 2, 2),
+                         generator=torch.Generator().manual_seed(1))
+        x = torch.rand(4, 2, 3)
+        with torch.no_grad():
+            hidden = torch.einsum('bif,ifh->bih', x, model.W)
+            expected = torch.relu(torch.einsum('bih,ifh->bif', hidden, model.W))
+            torch.testing.assert_close(model(x), expected)
+
+    def test_generate_batch_seeded_and_sparse(self):
+        config = ToyConfig(6, 2, 3)
+        never = ToyModel(config, feature_probability=torch.zeros(3, 1))
+        self.assertEqual(float(never.generate_batch(5).abs().sum()), 0.0)
+        model = ToyModel(config, feature_probability=torch.full((3, 1), 0.2))
+        first = model.generate_batch(64, generator=torch.Generator().manual_seed(9))
+        again = model.generate_batch(64, generator=torch.Generator().manual_seed(9))
+        torch.testing.assert_close(first, again)
+        self.assertTrue(bool(((first >= 0) & (first < 1)).all()))
+        nonzero_fraction = float((first != 0).float().mean())
+        self.assertTrue(0.1 < nonzero_fraction < 0.3)
+        with self.assertRaises(ValueError):
+            ToyModel(config, feature_probability=torch.tensor(1.5))
+
+    def test_training_moves_toward_notebook_phases(self):
+        # Notebook intro configuration at reduced steps: dense features
+        # (instance 0) can afford near-basis directions for few features,
+        # sparse features (last instance) represent more features per hidden
+        # dimension by sharing fractional dimensionality.
+        config = ToyConfig(5, 2, 10)
+        model, record = train_toy(
+            config,
+            feature_probability=(20 ** -torch.linspace(0, 1, 10))[:, None],
+            importance=(0.9 ** torch.arange(5))[None, :],
+            steps=2000, n_batch=512, seed=0)
+        initial = record['eval_loss_per_instance_initial']
+        final = record['eval_loss_per_instance_final']
+        self.assertTrue(all(f < i for f, i in zip(final, initial)))
+        dense = feature_geometry(model.W.detach()[0])
+        sparse = feature_geometry(model.W.detach()[-1])
+        dense_strong = int((dense['norms'] > 0.6).sum())
+        sparse_strong = int((sparse['norms'] > 0.6).sum())
+        self.assertGreater(sparse_strong, dense_strong)
+        sparse_median_d = float(
+            sparse['dimensionality'][sparse['norms'] > 0.6].median())
+        self.assertLess(sparse_median_d, float(dense['dimensionality'].max()))
+        with self.assertRaises(ValueError):
+            train_toy(config, steps=0)
 
 
 if __name__ == '__main__':
